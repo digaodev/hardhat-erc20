@@ -1,8 +1,6 @@
 //SPDX-License-Identifier: MIT
 pragma solidity 0.8.11;
 
-// import "hardhat/console.sol";
-
 contract ERC20 {
     uint256 public totalSupply;
     string public name;
@@ -88,11 +86,14 @@ contract ERC20 {
         emit Transfer(address(0), to, amount);
     }
 
-    function _burn(address sender, uint256 amount) internal {
-        require(sender != address(0), "ERC20: burn to zero address");
+    function _burn(address from, uint256 amount) internal {
+        require(from != address(0), "ERC20: burn from zero address");
 
+        // solidity already has underflow support built-in
         totalSupply = totalSupply - amount;
-        balanceOf[sender] = balanceOf[sender] - amount;
+        balanceOf[from] = balanceOf[from] - amount;
+
+        emit Transfer(from, address(0), amount);
     }
 
     function deposit() public payable {

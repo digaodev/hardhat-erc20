@@ -39,6 +39,13 @@ contract StableCoin is ERC20 {
     }
 
     function burn(uint256 burnStableCoinAmount) external {
+        int256 deficitOrSurplusInUsd = _getDeficitOrSurplusInContractInUsd();
+
+        require(
+            deficitOrSurplusInUsd >= 0,
+            "STC: cannot burn while in deficit"
+        );
+
         _burn(msg.sender, burnStableCoinAmount);
 
         uint256 refundingEth = burnStableCoinAmount / oracle.getPrice();
@@ -110,5 +117,29 @@ contract StableCoin is ERC20 {
             oracle.getPrice());
 
         depositorCoin.mint(msg.sender, mintDepositorCoinAmount);
+    }
+
+    function withdrawCollateralBuffer(uint256 burnDepositorCoinAmount)
+        external
+    {
+        require(
+            depositorCoin.balanceOf(msg.sender) >= burnDepositorCoinAmount,
+            "STC: insufficient DPC funds for sender"
+        );
+
+        depositorCoin.burn(msg.sender, burnDepositorCoinAmount);
+
+        int256 deficitOrSurplus = _getDeficitOrSurplusInContractInUsd();
+
+        require(deficitOrSurplus > 0, "STC: no funds to withdraw");
+
+        uint256 surplusInUsd = uint256(deficitOrSurplus);
+        uint256 dpcInUsdPrice = _getDpcInUsdPrice(surplusInUsd);
+        uint256 refundInUsd = burnDepositorCoinAmount / dpcInUsdPrice;
+        uint256 refundInEth = refundInUsd / oracle.getPrice();
+
+        (bool success, ) = msg.sender.call{value: refundInEth}("");
+
+        require(success, "STC: withdraw refund transaction failed");
     }
 }

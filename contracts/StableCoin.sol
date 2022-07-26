@@ -4,12 +4,18 @@ pragma solidity 0.8.11;
 import {ERC20} from "./ERC20.sol";
 import {DepositorCoin} from "./DepositorCoin.sol";
 import {Oracle} from "./Oracle.sol";
+import {WadLib} from "./WadLib.sol";
 
 contract StableCoin is ERC20 {
+    using WadLib for uint256;
     DepositorCoin public depositorCoin;
     Oracle public oracle;
     uint256 public feeRatePercentage;
     uint256 public constant INITIAL_COLLATERAL_RATIO_PERCENTAGE = 10;
+    error InitialCollateralRatioError(
+        string message,
+        uint256 minimumDepositAmount
+    );
 
     constructor(uint256 _feeRatePercentage, Oracle _oracle)
         ERC20("StableCoin", "STC")
@@ -75,9 +81,9 @@ contract StableCoin is ERC20 {
     function _getDpcInUsdPrice(uint256 surplusInUsd)
         private
         view
-        returns (uint256)
+        returns (WadLib.Wad)
     {
-        return depositorCoin.totalSupply() / surplusInUsd;
+        return WadLib.fromFraction(depositorCoin.totalSupply(), surplusInUsd);
     }
 
     function depositCollateralBuffer() external payable {
@@ -93,10 +99,15 @@ contract StableCoin is ERC20 {
             uint256 requiredInitialSurplusInEth = requiredInitialSurplusInUsd /
                 usdInEthPrice;
 
-            require(
-                msg.value >= deficitInEth + requiredInitialSurplusInEth,
-                "STC: unmet initial collateral ratio"
-            );
+            if (msg.value < deficitInEth + requiredInitialSurplusInEth) {
+                uint256 minimumDepositAmount = deficitInEth +
+                    requiredInitialSurplusInEth;
+
+                revert InitialCollateralRatioError(
+                    "STC: unmet initial collateral, minimum is",
+                    minimumDepositAmount
+                );
+            }
 
             uint256 newInitialSurplusInEth = msg.value - deficitInEth;
             uint256 newInitialSurplusInUsd = newInitialSurplusInEth *
@@ -111,9 +122,9 @@ contract StableCoin is ERC20 {
 
         uint256 surplusInUsd = uint256(deficitOrSurplusInUsd);
 
-        uint256 dpcInUsdPrice = _getDpcInUsdPrice(surplusInUsd);
+        WadLib.Wad dpcInUsdPrice = _getDpcInUsdPrice(surplusInUsd);
 
-        uint256 mintDepositorCoinAmount = ((msg.value * dpcInUsdPrice) /
+        uint256 mintDepositorCoinAmount = ((msg.value.mulWad(dpcInUsdPrice)) /
             oracle.getPrice());
 
         depositorCoin.mint(msg.sender, mintDepositorCoinAmount);
@@ -134,8 +145,8 @@ contract StableCoin is ERC20 {
         require(deficitOrSurplus > 0, "STC: no funds to withdraw");
 
         uint256 surplusInUsd = uint256(deficitOrSurplus);
-        uint256 dpcInUsdPrice = _getDpcInUsdPrice(surplusInUsd);
-        uint256 refundInUsd = burnDepositorCoinAmount / dpcInUsdPrice;
+        WadLib.Wad dpcInUsdPrice = _getDpcInUsdPrice(surplusInUsd);
+        uint256 refundInUsd = burnDepositorCoinAmount.mulWad(dpcInUsdPrice);
         uint256 refundInEth = refundInUsd / oracle.getPrice();
 
         (bool success, ) = msg.sender.call{value: refundInEth}("");
